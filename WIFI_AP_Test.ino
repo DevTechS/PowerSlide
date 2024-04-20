@@ -9,9 +9,13 @@ const char* password = "123456789";
 
 AsyncWebServer server(80);
 
+uint8_t brightness = 30;
+
 void setup(){
   Serial.begin(115200);
   Serial.println();
+
+  pinMode(LED_BUILTIN, OUTPUT);
   
   Serial.print("Setting AP (Access Point)…");
   WiFi.softAP(ssid, password);
@@ -21,14 +25,16 @@ void setup(){
   Serial.println(IP);
 
   server.on("/example", HTTP_GET, [](AsyncWebServerRequest *request){
-    Serial.println(request->header("Test"));
-    request->send_P(200, "text/plain", "Output");
+    brightness = (uint8_t)request->header("Control")[0];
+    Serial.println(brightness);
+    request->send_P(200, "text/plain", "Output_here");
   });
 
   server.begin();
 }
- 
+
 void loop(){
+  analogWrite(LED_BUILTIN, brightness);
   Serial.println("Loop");
-  delay(100);
+  delay(20);
 }
