@@ -3,7 +3,7 @@
 
 const uint8_t sensorCount = 2;
 
-const uint8_t xshutPins[sensorCount] = {14, 12};
+const uint8_t xshutPins[sensorCount-1] = {12};
 
 uint8_t SPAD_array[16][16] = {
         {128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248},
@@ -30,6 +30,29 @@ uint16_t sensor_data[sensorCount];
 int64_t last_reading_time[sensorCount]; // needs to be signed for later math to work
 int64_t time_taken[sensorCount];
 
+void initAllSensors() {
+  // Disable/reset all sensors by driving their XSHUT pins low.
+  last_reading_time[0] = 10000000000;
+  sensor_data[0] = 0;
+  for (uint8_t i = 1; i < sensorCount; i++)
+  {
+    pinMode(xshutPins[i-1], OUTPUT);
+    digitalWrite(xshutPins[i-1], LOW);
+    last_reading_time[i] = 10000000000;
+    sensor_data[i] = 0;
+  }
+
+  // Enable, initialize, and start each sensor, one by one.
+  initSensor(&sensors[0], 0);
+  for (uint8_t i = 1; i < sensorCount; i++)
+  {
+    pinMode(xshutPins[i-1], INPUT); // stop driving xSHUT, but DO NOT DRIVE HIGH!
+    delay(10);
+
+    initSensor(&sensors[i], i);
+  }
+}
+
 void initSensor(VL53L1X *sensor, int i) {
   sensor->setTimeout(500);
   if (!sensor->init())
@@ -43,7 +66,7 @@ void initSensor(VL53L1X *sensor, int i) {
 
   sensor->setROISize(16, 16);
   sensor->setROICenter(SPAD_array[7][8]); // Default is 199
-
+  
   sensor->setAddress(0x2A + i);
 
   sensor->startContinuous(10);
@@ -56,23 +79,7 @@ void setup()
   Wire.begin();
   Wire.setClock(400000); // use 400 kHz I2C
 
-  // Disable/reset all sensors by driving their XSHUT pins low.
-  for (uint8_t i = 0; i < sensorCount; i++)
-  {
-    pinMode(xshutPins[i], OUTPUT);
-    digitalWrite(xshutPins[i], LOW);
-    last_reading_time[i] = 10000000000;
-    sensor_data[i] = 0;
-  }
-
-  // Enable, initialize, and start each sensor, one by one.
-  for (uint8_t i = 0; i < sensorCount; i++)
-  {
-    pinMode(xshutPins[i], INPUT); // stop driving xSHUT, but DO NOT DRIVE HIGH!
-    delay(10);
-
-    initSensor(&sensors[i], i);
-  }
+  initAllSensors();
 }
 
 void loop(){
@@ -87,7 +94,7 @@ void loop(){
     }
     if(millis() - last_reading_time[i] > 100){
       Serial.println("Sensor FAILURE!");
-      initSensor(&sensors[i], i);
+      initAllSensors();
       last_reading_time[i] = millis();
     }
   }
