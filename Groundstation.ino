@@ -5,8 +5,8 @@
 #include <ESP8266WiFiMulti.h>
 ESP8266WiFiMulti WiFiMulti;
 
-const char* ssid = "ESP8266-Access-Point";
-const char* password = "123456789";
+const char* ssid = "PowerslideAP";
+const char* password = "ChangeThisBeforeUse";
 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
