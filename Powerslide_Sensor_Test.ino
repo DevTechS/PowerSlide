@@ -6,6 +6,9 @@
 #define Timeout 2000
 
 Adafruit_MPU6050 mpu;
+long IMU_Last_Reading_Time = 0;
+double IMU_Delta_T = 0;
+double IMU_Theta = 0;
 
 const uint8_t sensorCount = 4;
 const uint8_t xshutPins[sensorCount-1] = {2, 0, 16};
@@ -32,6 +35,7 @@ uint8_t SPAD_array[16][16] = {
 VL53L1X sensors[sensorCount];
 
 uint16_t sensor_data[sensorCount];
+uint16_t sensor_status[sensorCount];
 int64_t last_reading_time[sensorCount]; // needs to be signed for later math to work
 int64_t time_taken[sensorCount];
 
@@ -64,30 +68,40 @@ void initAllTOF() {
 
 void initSensor(VL53L1X *sensor, int i) {
   sensor->setTimeout(Timeout);
-  if (!sensor->init())
-  {
-    Serial.print("Failed to detect and initialize sensor ");
-    Serial.println(i);
-    while (1);
-  }
-  sensor->setDistanceMode(VL53L1X::Short);
-  sensor->setMeasurementTimingBudget(20000);
-
-  sensor->setROISize(16, 16);
-  sensor->setROICenter(SPAD_array[7][8]); // Default is 199
-  
+  bool init_needed = sensor->init();
   sensor->setAddress(0x2A + i);
+  if (init_needed){
 
-  sensor->startContinuous(20);
+    sensor->setDistanceMode(VL53L1X::Short);
+    sensor->setMeasurementTimingBudget(20000);
+    
+    switch(i) {
+      case 0:
+        sensor->setROISize(6, 8);
+        sensor->setROICenter(SPAD_array[7+4][8-5]);
+        break;
+      case 1:
+        sensor->setROISize(6, 8);
+        sensor->setROICenter(SPAD_array[7-4][8-5]);
+        break;
+      case 2:
+        sensor->setROISize(6, 8);
+        sensor->setROICenter(SPAD_array[7-4][8+5]);
+        break;
+      case 3:
+        sensor->setROISize(6, 8);
+        sensor->setROICenter(SPAD_array[7+4][8+5]);
+        break;
+      default:
+      sensor->setROISize(16, 16); // y, x
+      sensor->setROICenter(SPAD_array[7][8]); // x, y; Default is 199
+    }
+
+    sensor->startContinuous(15);
+  }
 }
 
-void setup()
-{
-  while (!Serial) {}
-  Serial.begin(115200);
-
-  initAllTOF();
-
+void initIMU() {
   if (!mpu.begin()) {
     Serial.println("Failed to find MPU6050 chip");
     while (1) {
@@ -99,13 +113,46 @@ void setup()
   mpu.setFilterBandwidth(MPU6050_BAND_44_HZ);
 }
 
+uint16_t getRobotDist() {
+  uint16_t range_min = 65535;
+  for (int i = 0; i < 4; i++) {
+    if (sensor_status[i] == 0) { // only count soild readings
+      if (sensor_data[i] < range_min) {
+        range_min = sensor_data[i];
+      }
+    }
+  }
+  return range_min;
+}
+
+void setup()
+{
+  while (!Serial) {}
+  Serial.begin(115200);
+
+  initAllTOF();
+
+  initIMU();
+}
+
 void loop(){
   // Update Sensor Vals
-  for (uint8_t i = 0; i < sensorCount; i++)
-  {
+  for (uint8_t i = 0; i < sensorCount; i++) {
     if(sensors[i].dataReady()){
       sensors[i].read(false);
-      sensor_data[i] = sensors[i].ranging_data.range_mm;
+      uint8_t range_status = sensors[i].ranging_data.range_status;
+      uint16_t range = sensors[i].ranging_data.range_mm;
+      if (range_status == 0) { // if object detected
+        sensor_data[i] = range;
+      } else if (range_status == 2 && (double)abs(getRobotDist() - range)/(double)range < 0.15) { // if close to other sensors
+        sensor_data[i] = range;
+        range_status = 20;
+      } else {
+        sensor_data[i] = 65535;
+      }
+      // sensor_data[i] = range;
+
+      sensor_status[i] = range_status;
       time_taken[i] = millis() - last_reading_time[i];
       last_reading_time[i] = millis();
     }
@@ -124,15 +171,19 @@ void loop(){
   
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
+  IMU_Delta_T = (millis() - IMU_Last_Reading_Time)/1000.0;
+  IMU_Last_Reading_Time = millis();
+  IMU_Theta += g.gyro.z*IMU_Delta_T;
 
   // Print Sensor Vals
   for (uint8_t i = 0; i < sensorCount; i++)
   {
     Serial.print(sensor_data[i]/304.8);
     Serial.print("\t");
-    Serial.print(time_taken[i]);
+    Serial.print(sensor_status[i]);
     Serial.print("\t");
   }
+  Serial.print(getRobotDist()/304.8);
   Serial.println();
 
   Serial.print("Acceleration X: ");
@@ -150,10 +201,14 @@ void loop(){
   Serial.print(", Z: ");
   Serial.print(g.gyro.z);
   Serial.println(" rad/s");
+  
+  Serial.print("Angle: ");
+  Serial.print(IMU_Theta);
+  Serial.println(" rad");
 
   Serial.print("Temperature: ");
   Serial.print(temp.temperature);
   Serial.println(" degC");
 
-  delay(1000);
+  delay(100);
 }
